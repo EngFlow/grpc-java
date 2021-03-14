@@ -148,7 +148,8 @@ public abstract class AbstractStream implements Stream {
     protected TransportState(
         int maxMessageSize,
         StatsTraceContext statsTraceCtx,
-        TransportTracer transportTracer) {
+        TransportTracer transportTracer,
+        Protocol protocol) {
       this.statsTraceCtx = checkNotNull(statsTraceCtx, "statsTraceCtx");
       this.transportTracer = checkNotNull(transportTracer, "transportTracer");
       rawDeframer = new MessageDeframer(
@@ -158,7 +159,7 @@ public abstract class AbstractStream implements Stream {
           statsTraceCtx,
           transportTracer);
       // TODO(#7168): use MigratingThreadDeframer when enabling retry doesn't break.
-      deframer = rawDeframer;
+      deframer = protocol == Protocol.GRPC_WEB_TEXT ? new Base64Deframer(rawDeframer) : rawDeframer;
     }
 
     final void optimizeForDirectExecutor() {
@@ -168,6 +169,7 @@ public abstract class AbstractStream implements Stream {
 
     protected void setFullStreamDecompressor(GzipInflatingBuffer fullStreamDecompressor) {
       rawDeframer.setFullStreamDecompressor(fullStreamDecompressor);
+      // TODO: Do we need to rewrap with Base64Deframer?
       deframer = new ApplicationThreadDeframer(this, this, rawDeframer);
     }
 

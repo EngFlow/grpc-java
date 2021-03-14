@@ -149,6 +149,10 @@ public final class GrpcUtil {
    */
   public static final String CONTENT_TYPE_GRPC = "application/grpc";
 
+  public static final String CONTENT_TYPE_GRPC_WEB = "application/grpc-web";
+  public static final String CONTENT_TYPE_GRPC_WEB_TEXT = "application/grpc-web-text";
+  public static final String CONTENT_TYPE_GRPC_WEB_TEXT_PROTO = "application/grpc-web-text+proto";
+
   /**
    * The HTTP method used for GRPC requests.
    */
@@ -430,6 +434,14 @@ public final class GrpcUtil {
     // gRPC wire spec.
     char nextChar = contentType.charAt(CONTENT_TYPE_GRPC.length());
     return nextChar == '+' || nextChar == ';';
+  }
+
+  public static boolean isGrpcWebContentType(String contentType) {
+    if (contentType == null) {
+      return false;
+    }
+    // TODO: Also support grpc-web, grpc-web+proto, and grpc-web-text+proto.
+    return CONTENT_TYPE_GRPC_WEB_TEXT.equals(contentType.toLowerCase());
   }
 
   /**

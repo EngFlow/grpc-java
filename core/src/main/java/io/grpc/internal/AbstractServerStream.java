@@ -171,7 +171,7 @@ public abstract class AbstractServerStream extends AbstractStream
   }
 
   /**
-   * This should only called from the transport thread (except for private interactions with
+   * This should only be called from the transport thread (except for private interactions with
    * {@code AbstractServerStream}).
    */
   protected abstract static class TransportState extends AbstractStream.TransportState {
@@ -191,11 +191,13 @@ public abstract class AbstractServerStream extends AbstractStream
     protected TransportState(
         int maxMessageSize,
         StatsTraceContext statsTraceCtx,
-        TransportTracer transportTracer) {
+        TransportTracer transportTracer,
+        Protocol protocol) {
       super(
           maxMessageSize,
           statsTraceCtx,
-          Preconditions.checkNotNull(transportTracer, "transportTracer"));
+          Preconditions.checkNotNull(transportTracer, "transportTracer"),
+          protocol);
       this.statsTraceCtx = Preconditions.checkNotNull(statsTraceCtx, "statsTraceCtx");
     }
 

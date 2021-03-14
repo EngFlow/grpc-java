@@ -43,6 +43,7 @@ import io.grpc.Status;
 import io.grpc.internal.GrpcUtil;
 import io.grpc.internal.KeepAliveManager;
 import io.grpc.internal.LogExceptionRunnable;
+import io.grpc.internal.Protocol;
 import io.grpc.internal.ServerTransportListener;
 import io.grpc.internal.StatsTraceContext;
 import io.grpc.internal.TransportTracer;
@@ -417,11 +418,13 @@ class NettyServerHandler extends AbstractNettyHandler {
         return;
       }
       String contentTypeString = contentType.toString();
-      if (!GrpcUtil.isGrpcContentType(contentTypeString)) {
+      boolean isGrpcWeb = GrpcUtil.isGrpcWebContentType(contentTypeString);
+      if (!isGrpcWeb && !GrpcUtil.isGrpcContentType(contentTypeString)) {
         respondWithHttpError(ctx, streamId, 415, Status.Code.INTERNAL,
             String.format("Content-Type '%s' is not supported", contentTypeString));
         return;
       }
+      Protocol protocol = isGrpcWeb ? Protocol.GRPC_WEB_TEXT : Protocol.GRPC;
 
       if (!HTTP_METHOD.contentEquals(headers.method())) {
         respondWithHttpError(ctx, streamId, 405, Status.Code.INTERNAL,
@@ -429,7 +432,9 @@ class NettyServerHandler extends AbstractNettyHandler {
         return;
       }
 
-      if (!teWarningLogged && !TE_TRAILERS.contentEquals(headers.get(TE_HEADER))) {
+      if ((protocol == Protocol.GRPC)
+          && !teWarningLogged
+          && !TE_TRAILERS.contentEquals(headers.get(TE_HEADER))) {
         logger.warning(String.format("Expected header TE: %s, but %s is received. This means "
                 + "some intermediate proxy may not support trailers",
             TE_TRAILERS, headers.get(TE_HEADER)));
@@ -451,7 +456,8 @@ class NettyServerHandler extends AbstractNettyHandler {
           maxMessageSize,
           statsTraceCtx,
           transportTracer,
-          method);
+          method,
+          protocol);
 
       PerfMark.startTask("NettyServerHandler.onHeadersRead", state.tag());
       try {
@@ -462,7 +468,8 @@ class NettyServerHandler extends AbstractNettyHandler {
             attributes,
             authority,
             statsTraceCtx,
-            transportTracer);
+            transportTracer,
+            protocol);
         transportListener.streamCreated(stream, method, metadata);
         state.onStreamAllocated();
         http2Stream.setProperty(streamKey, state);
