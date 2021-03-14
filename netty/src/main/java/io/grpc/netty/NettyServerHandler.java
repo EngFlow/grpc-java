@@ -411,6 +411,14 @@ class NettyServerHandler extends AbstractNettyHandler {
 
       // Verify that the Content-Type is correct in the request.
       CharSequence contentType = headers.get(CONTENT_TYPE_HEADER);
+
+      // TODO: This duplicates some of the logic below. It would be better not to do that.
+      HttpStreamListener listener = NettyHttpStream.httpStreamListener.get();
+      if (listener != null && !isGrpcCall(contentType)) {
+        forwardToHttpServer(listener, ctx, streamId, headers);
+        return;
+      }
+
       if (contentType == null) {
         respondWithHttpError(
             ctx, streamId, 415, Status.Code.INTERNAL, "Content-Type is missing from the request");
@@ -473,6 +481,45 @@ class NettyServerHandler extends AbstractNettyHandler {
       logger.log(Level.WARNING, "Exception in onHeadersRead()", e);
       // Throw an exception that will get handled by onStreamError.
       throw newStreamException(streamId, e);
+    }
+  }
+
+  // Identifies gRPC calls by the Content-Type header, which must be equal to "application/grpc"
+  // for gRPC calls.
+  private boolean isGrpcCall(CharSequence contentType) {
+    if (contentType == null) {
+      return false;
+    }
+    String contentTypeString = contentType.toString();
+    return GrpcUtil.isGrpcContentType(contentTypeString);
+  }
+
+  // Forwards the incoming request to the global HttpStreamListener for processing.
+  // TODO(ulfjack): Pass the HttpStreamListener through the Server rather than a static field.
+  private void forwardToHttpServer(
+      HttpStreamListener listener, ChannelHandlerContext ctx, int streamId, Http2Headers headers) {
+    Http2Stream http2Stream = requireHttp2Stream(streamId);
+    StatsTraceContext statsTraceCtx = StatsTraceContext.NOOP;
+    TransportTracer transportTracer = new TransportTracer();
+    //
+    String method = "http/pass-through";
+    NettyHttpStream.TransportState state = new NettyHttpStream.TransportState(
+        this,
+        ctx.channel().eventLoop(),
+        http2Stream,
+        maxMessageSize,
+        statsTraceCtx,
+        transportTracer,
+        method);
+
+    PerfMark.startTask("NettyServerHandler.forwardToHttpServer", state.tag());
+    try {
+      NettyHttpStream stream = new NettyHttpStream(ctx.channel(), state, this);
+      listener.startStream(stream, headers);
+      state.onStreamAllocated();
+      http2Stream.setProperty(streamKey, state);
+    } finally {
+      PerfMark.stopTask("NettyServerHandler.forwardToHttpServer", state.tag());
     }
   }
 
