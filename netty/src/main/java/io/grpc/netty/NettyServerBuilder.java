@@ -27,6 +27,7 @@ import static io.grpc.internal.GrpcUtil.SERVER_KEEPALIVE_TIME_NANOS_DISABLED;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import io.grpc.Attributes;
+import io.grpc.Attributes.Key;
 import io.grpc.ExperimentalApi;
 import io.grpc.Internal;
 import io.grpc.ServerBuilder;
@@ -67,6 +68,8 @@ import javax.net.ssl.SSLException;
 @ExperimentalApi("https://github.com/grpc/grpc-java/issues/1784")
 @CanIgnoreReturnValue
 public final class NettyServerBuilder extends AbstractServerImplBuilder<NettyServerBuilder> {
+  public static final Key<Long> REMOTE_MAX_METADATA_SIZE_KEY =
+      Attributes.Key.of("http2-remote-max-metadata-size");
 
   // 1MiB
   public static final int DEFAULT_FLOW_CONTROL_WINDOW = 1024 * 1024;

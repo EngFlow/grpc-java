@@ -31,6 +31,7 @@ import static io.netty.handler.codec.http2.DefaultHttp2LocalFlowController.DEFAU
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.base.Supplier;
 import io.grpc.Attributes;
 import io.grpc.ChannelLogger;
 import io.grpc.ChannelLogger.ChannelLogLevel;
@@ -76,6 +77,7 @@ import io.netty.handler.codec.http2.Http2FrameReader;
 import io.netty.handler.codec.http2.Http2FrameWriter;
 import io.netty.handler.codec.http2.Http2Headers;
 import io.netty.handler.codec.http2.Http2HeadersDecoder;
+import io.netty.handler.codec.http2.Http2HeadersEncoder;
 import io.netty.handler.codec.http2.Http2InboundFrameLogger;
 import io.netty.handler.codec.http2.Http2OutboundFrameLogger;
 import io.netty.handler.codec.http2.Http2Settings;
@@ -119,6 +121,7 @@ class NettyServerHandler extends AbstractNettyHandler {
   private final TransportTracer transportTracer;
   private final KeepAliveEnforcer keepAliveEnforcer;
   private final Attributes eagAttributes;
+  private final Supplier<Http2HeadersEncoder.Configuration> remoteSettings;
   /** Incomplete attributes produced by negotiator. */
   private Attributes negotiationAttributes;
   private InternalChannelz.Security securityInfo;
@@ -237,6 +240,7 @@ class NettyServerHandler extends AbstractNettyHandler {
     settings.maxConcurrentStreams(maxStreams);
     settings.maxHeaderListSize(maxHeaderListSize);
 
+    Http2FrameWriter finalFrameWriter = frameWriter;
     return new NettyServerHandler(
         channelUnused,
         connection,
@@ -244,6 +248,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         streamTracerFactories,
         transportTracer,
         decoder, encoder, settings,
+        () -> finalFrameWriter.configuration().headersConfiguration(),
         maxMessageSize,
         keepAliveTimeInNanos, keepAliveTimeoutInNanos,
         maxConnectionIdleInNanos,
@@ -262,6 +267,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       Http2ConnectionDecoder decoder,
       Http2ConnectionEncoder encoder,
       Http2Settings settings,
+      Supplier<Http2HeadersEncoder.Configuration> remoteSettings,
       int maxMessageSize,
       long keepAliveTimeInNanos,
       long keepAliveTimeoutInNanos,
@@ -273,6 +279,8 @@ class NettyServerHandler extends AbstractNettyHandler {
       Attributes eagAttributes) {
     super(channelUnused, decoder, encoder, settings, new ServerChannelLogger(),
         autoFlowControl, null);
+
+    this.remoteSettings = remoteSettings;
 
     final MaxConnectionIdleManager maxConnectionIdleManager;
     if (maxConnectionIdleInNanos == MAX_CONNECTION_IDLE_NANOS_DISABLED) {
@@ -454,12 +462,17 @@ class NettyServerHandler extends AbstractNettyHandler {
           method);
 
       PerfMark.startTask("NettyServerHandler.onHeadersRead", state.tag());
+      long remoteMaxMetadataSize = remoteSettings.get().maxHeaderListSize();
+      Attributes streamAttributes =
+          attributes.toBuilder()
+              .set(NettyServerBuilder.REMOTE_MAX_METADATA_SIZE_KEY, remoteMaxMetadataSize)
+              .build();
       try {
         String authority = getOrUpdateAuthority((AsciiString) headers.authority());
         NettyServerStream stream = new NettyServerStream(
             ctx.channel(),
             state,
-            attributes,
+            streamAttributes,
             authority,
             statsTraceCtx,
             transportTracer);
