@@ -31,6 +31,7 @@ import io.grpc.InternalMetadata;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.internal.GrpcUtil;
+import io.grpc.internal.Protocol;
 import io.grpc.internal.SharedResourceHolder.Resource;
 import io.grpc.internal.TransportTracer;
 import io.grpc.netty.GrpcHttp2HeadersUtils.GrpcHttp2InboundHeaders;
@@ -82,6 +83,8 @@ class Utils {
   public static final AsciiString HTTP = AsciiString.of("http");
   public static final AsciiString CONTENT_TYPE_HEADER = AsciiString.of(CONTENT_TYPE_KEY.name());
   public static final AsciiString CONTENT_TYPE_GRPC = AsciiString.of(GrpcUtil.CONTENT_TYPE_GRPC);
+  public static final AsciiString CONTENT_TYPE_GRPC_WEB_TEXT = AsciiString.of(GrpcUtil.CONTENT_TYPE_GRPC_WEB_TEXT);
+  public static final AsciiString CONTENT_TYPE_GRPC_WEB_TEXT_PROTO = AsciiString.of(GrpcUtil.CONTENT_TYPE_GRPC_WEB_TEXT_PROTO);
   public static final AsciiString TE_HEADER = AsciiString.of(GrpcUtil.TE_HEADER.name());
   public static final AsciiString TE_TRAILERS = AsciiString.of(GrpcUtil.TE_TRAILERS);
   public static final AsciiString USER_AGENT = AsciiString.of(GrpcUtil.USER_AGENT_KEY.name());
@@ -235,13 +238,13 @@ class Utils {
         userAgent);
   }
 
-  public static Http2Headers convertServerHeaders(Metadata headers) {
+  public static Http2Headers convertServerHeaders(Metadata headers, Protocol protocol) {
     // Discard any application supplied duplicates of the reserved headers
     headers.discardAll(CONTENT_TYPE_KEY);
     headers.discardAll(GrpcUtil.TE_HEADER);
     headers.discardAll(GrpcUtil.USER_AGENT_KEY);
 
-    return GrpcHttp2OutboundHeaders.serverResponseHeaders(toHttp2Headers(headers));
+    return GrpcHttp2OutboundHeaders.serverResponseHeaders(toHttp2Headers(headers), protocol);
   }
 
   public static Metadata convertTrailers(Http2Headers http2Headers) {
@@ -254,7 +257,7 @@ class Utils {
 
   public static Http2Headers convertTrailers(Metadata trailers, boolean headersSent) {
     if (!headersSent) {
-      return convertServerHeaders(trailers);
+      return convertServerHeaders(trailers, Protocol.GRPC);
     }
     return GrpcHttp2OutboundHeaders.serverResponseTrailers(toHttp2Headers(trailers));
   }

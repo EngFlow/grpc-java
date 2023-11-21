@@ -244,7 +244,7 @@ public abstract class AbstractClientStream extends AbstractStream
         int maxMessageSize,
         StatsTraceContext statsTraceCtx,
         TransportTracer transportTracer) {
-      super(maxMessageSize, statsTraceCtx, transportTracer);
+      super(maxMessageSize, statsTraceCtx, transportTracer, Protocol.GRPC);
       this.statsTraceCtx = checkNotNull(statsTraceCtx, "statsTraceCtx");
     }
 

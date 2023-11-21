@@ -35,9 +35,11 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.base.Ticker;
+import com.google.common.collect.Sets;
 import io.grpc.Attributes;
 import io.grpc.ChannelLogger;
 import io.grpc.ChannelLogger.ChannelLogLevel;
+import io.grpc.Grpc;
 import io.grpc.InternalChannelz;
 import io.grpc.InternalMetadata;
 import io.grpc.InternalStatus;
@@ -49,6 +51,7 @@ import io.grpc.internal.KeepAliveEnforcer;
 import io.grpc.internal.KeepAliveManager;
 import io.grpc.internal.LogExceptionRunnable;
 import io.grpc.internal.MaxConnectionIdleManager;
+import io.grpc.internal.Protocol;
 import io.grpc.internal.ServerTransportListener;
 import io.grpc.internal.StatsTraceContext;
 import io.grpc.internal.TransportTracer;
@@ -95,7 +98,9 @@ import io.perfmark.PerfMark;
 import io.perfmark.Tag;
 import io.perfmark.TaskCloseable;
 import java.text.MessageFormat;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -129,6 +134,7 @@ class NettyServerHandler extends AbstractNettyHandler {
   private final TransportTracer transportTracer;
   private final KeepAliveEnforcer keepAliveEnforcer;
   private final Attributes eagAttributes;
+  private final Set<Protocol> permittedProtocols;
   /** Incomplete attributes produced by negotiator. */
   private Attributes negotiationAttributes;
   private InternalChannelz.Security securityInfo;
@@ -164,7 +170,8 @@ class NettyServerHandler extends AbstractNettyHandler {
       long maxConnectionAgeGraceInNanos,
       boolean permitKeepAliveWithoutCalls,
       long permitKeepAliveTimeInNanos,
-      Attributes eagAttributes) {
+      Attributes eagAttributes,
+      boolean permitGrpcWebText) {
     Preconditions.checkArgument(maxHeaderListSize > 0, "maxHeaderListSize must be positive: %s",
         maxHeaderListSize);
     Http2FrameLogger frameLogger = new Http2FrameLogger(LogLevel.DEBUG, NettyServerHandler.class);
@@ -193,7 +200,8 @@ class NettyServerHandler extends AbstractNettyHandler {
         permitKeepAliveWithoutCalls,
         permitKeepAliveTimeInNanos,
         eagAttributes,
-        Ticker.systemTicker());
+        Ticker.systemTicker(),
+        permitGrpcWebText);
   }
 
   static NettyServerHandler newHandler(
@@ -216,7 +224,8 @@ class NettyServerHandler extends AbstractNettyHandler {
       boolean permitKeepAliveWithoutCalls,
       long permitKeepAliveTimeInNanos,
       Attributes eagAttributes,
-      Ticker ticker) {
+      Ticker ticker,
+      boolean permitGrpcWebText) {
     Preconditions.checkArgument(maxStreams > 0, "maxStreams must be positive: %s", maxStreams);
     Preconditions.checkArgument(flowControlWindow > 0, "flowControlWindow must be positive: %s",
         flowControlWindow);
@@ -266,7 +275,8 @@ class NettyServerHandler extends AbstractNettyHandler {
         maxConnectionAgeInNanos, maxConnectionAgeGraceInNanos,
         keepAliveEnforcer,
         autoFlowControl,
-        eagAttributes, ticker);
+        eagAttributes, ticker,
+        permitGrpcWebText);
   }
 
   private NettyServerHandler(
@@ -287,7 +297,8 @@ class NettyServerHandler extends AbstractNettyHandler {
       final KeepAliveEnforcer keepAliveEnforcer,
       boolean autoFlowControl,
       Attributes eagAttributes,
-      Ticker ticker) {
+      Ticker ticker,
+      boolean permitGrpcWebText) {
     super(channelUnused, decoder, encoder, settings, new ServerChannelLogger(),
         autoFlowControl, null, ticker);
 
@@ -329,6 +340,11 @@ class NettyServerHandler extends AbstractNettyHandler {
     this.maxConnectionAgeGraceInNanos = maxConnectionAgeGraceInNanos;
     this.keepAliveEnforcer = checkNotNull(keepAliveEnforcer, "keepAliveEnforcer");
     this.eagAttributes = checkNotNull(eagAttributes, "eagAttributes");
+    this.permittedProtocols =
+        Sets.immutableEnumSet(
+            permitGrpcWebText
+                ? EnumSet.of(Protocol.GRPC, Protocol.GRPC_WEB_TEXT)
+                : EnumSet.of(Protocol.GRPC));
 
     streamKey = encoder.connection().newKey();
     this.transportListener = checkNotNull(transportListener, "transportListener");
@@ -432,15 +448,16 @@ class NettyServerHandler extends AbstractNettyHandler {
 
       // Verify that the Content-Type is correct in the request.
       CharSequence contentType = headers.get(CONTENT_TYPE_HEADER);
+      @Nullable Protocol protocol = detectGrpcProtocol(contentType);
+
       if (contentType == null) {
         respondWithHttpError(
             ctx, streamId, 415, Status.Code.INTERNAL, "Content-Type is missing from the request");
         return;
       }
-      String contentTypeString = contentType.toString();
-      if (!GrpcUtil.isGrpcContentType(contentTypeString)) {
+      if (protocol == null || !permittedProtocols.contains(protocol)) {
         respondWithHttpError(ctx, streamId, 415, Status.Code.INTERNAL,
-            String.format("Content-Type '%s' is not supported", contentTypeString));
+            String.format("Content-Type '%s' is not supported", contentType.toString()));
         return;
       }
 
@@ -450,7 +467,9 @@ class NettyServerHandler extends AbstractNettyHandler {
         return;
       }
 
-      if (!teWarningLogged && !TE_TRAILERS.contentEquals(headers.get(TE_HEADER))) {
+      if ((protocol == Protocol.GRPC)
+          && !teWarningLogged
+          && !TE_TRAILERS.contentEquals(headers.get(TE_HEADER))) {
         logger.warning(String.format("Expected header TE: %s, but %s is received. This means "
                 + "some intermediate proxy may not support trailers",
             TE_TRAILERS, headers.get(TE_HEADER)));
@@ -472,18 +491,23 @@ class NettyServerHandler extends AbstractNettyHandler {
           maxMessageSize,
           statsTraceCtx,
           transportTracer,
-          method);
+          method,
+          protocol);
 
+      Attributes attrs = attributes.toBuilder()
+          .set(NettyServerBuilder.STREAM_ATTR_PROTOCOL, protocol)
+          .build();
       try (TaskCloseable ignore = PerfMark.traceTask("NettyServerHandler.onHeadersRead")) {
         PerfMark.attachTag(state.tag());
         String authority = getOrUpdateAuthority((AsciiString) headers.authority());
         NettyServerStream stream = new NettyServerStream(
             ctx.channel(),
             state,
-            attributes,
+            attrs,
             authority,
             statsTraceCtx,
-            transportTracer);
+            transportTracer,
+            protocol);
         transportListener.streamCreated(stream, method, metadata);
         state.onStreamAllocated();
         http2Stream.setProperty(streamKey, state);
@@ -493,6 +517,22 @@ class NettyServerHandler extends AbstractNettyHandler {
       // Throw an exception that will get handled by onStreamError.
       throw newStreamException(streamId, e);
     }
+  }
+
+  // Identifies gRPC calls by the Content-Type header.
+  @Nullable
+  private Protocol detectGrpcProtocol(CharSequence contentType) {
+    if (contentType == null) {
+      return null;
+    }
+    String contentTypeString = contentType.toString();
+    if (GrpcUtil.isGrpcContentType(contentTypeString)) {
+      return Protocol.GRPC;
+    }
+    if (GrpcUtil.isGrpcWebContentType(contentTypeString)) {
+      return Protocol.GRPC_WEB_TEXT;
+    }
+    return null;
   }
 
   private String getOrUpdateAuthority(AsciiString authority) {
