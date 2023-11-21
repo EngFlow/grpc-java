@@ -112,4 +112,8 @@ public abstract class GrpcHttp2ConnectionHandler extends Http2ConnectionHandler 
   public String getAuthority() {
     throw new UnsupportedOperationException();
   }
+
+  HttpStreamListener getHttpStreamListener() {
+    return null;
+  }
 }
