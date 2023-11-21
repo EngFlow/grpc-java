@@ -1056,6 +1056,7 @@ abstract class RetriableStream<ReqT> implements ClientStream {
       checkState(
           savedState.winningSubstream != null, "Headers should be received prior to messages.");
       if (savedState.winningSubstream != substream) {
+        GrpcUtil.closeQuietly(producer);
         return;
       }
       listenerSerializeExecutor.execute(
