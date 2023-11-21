@@ -133,6 +133,7 @@ class NettyServerHandler extends AbstractNettyHandler {
   private final TransportTracer transportTracer;
   private final KeepAliveEnforcer keepAliveEnforcer;
   private final Attributes eagAttributes;
+  private final HttpStreamListener httpStreamListener;
   private final Set<Protocol> permittedProtocols;
   /** Incomplete attributes produced by negotiator. */
   private Attributes negotiationAttributes;
@@ -170,6 +171,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       boolean permitKeepAliveWithoutCalls,
       long permitKeepAliveTimeInNanos,
       Attributes eagAttributes,
+      HttpStreamListener httpStreamListener,
       boolean permitGrpcWebText) {
     Preconditions.checkArgument(maxHeaderListSize > 0, "maxHeaderListSize must be positive: %s",
         maxHeaderListSize);
@@ -200,6 +202,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         permitKeepAliveTimeInNanos,
         eagAttributes,
         Ticker.systemTicker(),
+        httpStreamListener,
         permitGrpcWebText);
   }
 
@@ -224,6 +227,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       long permitKeepAliveTimeInNanos,
       Attributes eagAttributes,
       Ticker ticker,
+      HttpStreamListener httpStreamListener,
       boolean permitGrpcWebText) {
     Preconditions.checkArgument(maxStreams > 0, "maxStreams must be positive: %s", maxStreams);
     Preconditions.checkArgument(flowControlWindow > 0, "flowControlWindow must be positive: %s",
@@ -275,6 +279,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         keepAliveEnforcer,
         autoFlowControl,
         eagAttributes, ticker,
+        httpStreamListener,
         permitGrpcWebText);
   }
 
@@ -297,6 +302,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       boolean autoFlowControl,
       Attributes eagAttributes,
       Ticker ticker,
+      HttpStreamListener httpStreamListener,
       boolean permitGrpcWebText) {
     super(channelUnused, decoder, encoder, settings, new ServerChannelLogger(),
         autoFlowControl, null, ticker);
@@ -339,6 +345,7 @@ class NettyServerHandler extends AbstractNettyHandler {
     this.maxConnectionAgeGraceInNanos = maxConnectionAgeGraceInNanos;
     this.keepAliveEnforcer = checkNotNull(keepAliveEnforcer, "keepAliveEnforcer");
     this.eagAttributes = checkNotNull(eagAttributes, "eagAttributes");
+    this.httpStreamListener = httpStreamListener;
     this.permittedProtocols =
         Sets.immutableEnumSet(
             permitGrpcWebText
@@ -449,6 +456,11 @@ class NettyServerHandler extends AbstractNettyHandler {
       CharSequence contentType = headers.get(CONTENT_TYPE_HEADER);
       @Nullable Protocol protocol = detectGrpcProtocol(contentType);
 
+      if (httpStreamListener != null && protocol == null) {
+        forwardToHttpServer(httpStreamListener, ctx, streamId, headers);
+        return;
+      }
+
       if (contentType == null) {
         respondWithHttpError(
             ctx, streamId, 415, Status.Code.INTERNAL, "Content-Type is missing from the request");
@@ -534,6 +546,43 @@ class NettyServerHandler extends AbstractNettyHandler {
       return Protocol.GRPC_WEB_TEXT;
     }
     return null;
+  }
+
+  @Override
+  HttpStreamListener getHttpStreamListener() {
+    return httpStreamListener;
+  }
+
+  // Forwards the incoming request to the global HttpStreamListener for processing.
+  private void forwardToHttpServer(
+      HttpStreamListener listener, ChannelHandlerContext ctx, int streamId, Http2Headers headers) {
+    Http2Stream http2Stream = requireHttp2Stream(streamId);
+    StatsTraceContext statsTraceCtx = StatsTraceContext.NOOP;
+    TransportTracer transportTracer = new TransportTracer();
+    //
+    String method = "http/pass-through";
+    NettyHttp2Stream.TransportState state = new NettyHttp2Stream.TransportState(
+        this,
+        ctx.channel().eventLoop(),
+        http2Stream,
+        maxMessageSize,
+        statsTraceCtx,
+        transportTracer,
+        method);
+
+    PerfMark.startTask("NettyServerHandler.forwardToHttpServer", state.tag());
+    try {
+      NettyHttp2Stream stream = new NettyHttp2Stream(
+          ctx.channel(),
+          negotiationAttributes.get(Grpc.TRANSPORT_ATTR_SSL_SESSION),
+          state,
+          this);
+      listener.startStream(stream, headers);
+      state.onStreamAllocated();
+      http2Stream.setProperty(streamKey, state);
+    } finally {
+      PerfMark.stopTask("NettyServerHandler.forwardToHttpServer", state.tag());
+    }
   }
 
   private String getOrUpdateAuthority(AsciiString authority) {
