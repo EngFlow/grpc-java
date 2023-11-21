@@ -64,7 +64,7 @@ final class Base64Deframer implements Deframer {
   @Override
   public void deframe(ReadableBuffer data) {
     // TODO: Make this more efficient.
-    try (data) {
+    try {
       int fill = Math.min(4 - bufferedBytes, data.readableBytes());
       data.readBytes(buffer, bufferedBytes, fill);
       bufferedBytes += fill;
@@ -79,6 +79,8 @@ final class Base64Deframer implements Deframer {
       delegate.deframe(ReadableBuffers.wrap(decoded));
       bufferedBytes = data.readableBytes();
       data.readBytes(buffer, 0, bufferedBytes);
+    } finally {
+      data.close();
     }
   }
 
