@@ -78,6 +78,7 @@ class NettyServerTransport implements ServerTransport {
   private final boolean permitKeepAliveWithoutCalls;
   private final long permitKeepAliveTimeInNanos;
   private final Attributes eagAttributes;
+  private final HttpStreamListener httpStreamListener;
   private final boolean permitGrpcWebText;
   private final List<? extends ServerStreamTracer.Factory> streamTracerFactories;
   private final TransportTracer transportTracer;
@@ -101,6 +102,7 @@ class NettyServerTransport implements ServerTransport {
       boolean permitKeepAliveWithoutCalls,
       long permitKeepAliveTimeInNanos,
       Attributes eagAttributes,
+      HttpStreamListener httpStreamListener,
       boolean permitGrpcWebText) {
     this.channel = Preconditions.checkNotNull(channel, "channel");
     this.channelUnused = channelUnused;
@@ -121,6 +123,7 @@ class NettyServerTransport implements ServerTransport {
     this.permitKeepAliveWithoutCalls = permitKeepAliveWithoutCalls;
     this.permitKeepAliveTimeInNanos = permitKeepAliveTimeInNanos;
     this.eagAttributes = Preconditions.checkNotNull(eagAttributes, "eagAttributes");
+    this.httpStreamListener = httpStreamListener;
     this.permitGrpcWebText = permitGrpcWebText;
     SocketAddress remote = channel.remoteAddress();
     this.logId = InternalLogId.allocate(getClass(), remote != null ? remote.toString() : null);
@@ -281,6 +284,7 @@ class NettyServerTransport implements ServerTransport {
         permitKeepAliveWithoutCalls,
         permitKeepAliveTimeInNanos,
         eagAttributes,
+        httpStreamListener,
         permitGrpcWebText);
   }
 }

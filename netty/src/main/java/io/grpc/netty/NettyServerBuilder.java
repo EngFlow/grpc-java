@@ -117,6 +117,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
   private boolean permitKeepAliveWithoutCalls;
   private long permitKeepAliveTimeInNanos = TimeUnit.MINUTES.toNanos(5);
   private Attributes eagAttributes = Attributes.EMPTY;
+  private HttpStreamListener httpStreamListener;
   private boolean permitGrpcWebText;
 
   /**
@@ -644,7 +645,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
         keepAliveTimeInNanos, keepAliveTimeoutInNanos,
         maxConnectionIdleInNanos, maxConnectionAgeInNanos,
         maxConnectionAgeGraceInNanos, permitKeepAliveWithoutCalls, permitKeepAliveTimeInNanos,
-        eagAttributes, permitGrpcWebText, this.serverImplBuilder.getChannelz());
+        eagAttributes, httpStreamListener, permitGrpcWebText, this.serverImplBuilder.getChannelz());
   }
 
   @VisibleForTesting
@@ -694,6 +695,11 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
       throw new RuntimeException(e);
     }
     protocolNegotiatorFactory = ProtocolNegotiators.serverTlsFactory(sslContext);
+    return this;
+  }
+
+  public NettyServerBuilder setHttpStreamListener(HttpStreamListener httpStreamListener) {
+    this.httpStreamListener = httpStreamListener;
     return this;
   }
 

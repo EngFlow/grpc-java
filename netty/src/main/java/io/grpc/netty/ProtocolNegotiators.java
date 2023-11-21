@@ -389,7 +389,7 @@ final class ProtocolNegotiators {
         ChannelHandler sth =
             new ServerTlsHandler(
                 gnh,
-                new UnsupportedHttp1ConnectionHandler(),
+                new Http1BypassChannelHandler(handler.getHttpStreamListener()),
                 sslContext,
                 executorPool);
         return new WaitUntilActiveHandler(sth, handler.getNegotiationLogger());
