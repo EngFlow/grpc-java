@@ -781,11 +781,13 @@ class NettyServerHandler extends AbstractNettyHandler {
     PerfMark.startTask("NettyServerHandler.sendGrpcFrame", cmd.stream().tag());
     PerfMark.linkIn(cmd.getLink());
     try {
-      if (cmd.endStream()) {
-        closeStreamWhenDone(promise, cmd.stream().id());
+      int streamId = cmd.stream().id();
+      Http2Stream stream = connection().stream(streamId);
+      if (stream != null && cmd.endStream()) {
+        closeStreamWhenDone(promise, streamId);
       }
       // Call the base class to write the HTTP/2 DATA frame.
-      encoder().writeData(ctx, cmd.stream().id(), cmd.content(), 0, cmd.endStream(), promise);
+      encoder().writeData(ctx, streamId, cmd.content(), 0, cmd.endStream(), promise);
     } finally {
       PerfMark.stopTask("NettyServerHandler.sendGrpcFrame", cmd.stream().tag());
     }
