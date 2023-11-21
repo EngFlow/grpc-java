@@ -291,7 +291,7 @@ class Utils {
       // look.
       ClosedChannelException extraT = new ClosedChannelException();
       extraT.initCause(t);
-      return Status.UNKNOWN.withDescription("channel closed").withCause(extraT);
+      return Status.UNAVAILABLE.withDescription("channel closed").withCause(extraT);
     }
     if (t instanceof DecoderException && t.getCause() instanceof SSLException) {
       return Status.UNAVAILABLE.withDescription("ssl exception").withCause(t);

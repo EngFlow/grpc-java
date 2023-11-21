@@ -706,7 +706,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         maxConnectionAgeMonitor.cancel(false);
       }
       final Status status =
-          Status.UNAVAILABLE.withDescription("connection terminated for unknown reason");
+          Status.CANCELLED.withDescription("connection terminated for unknown reason");
       // Any streams that are still active must be closed
       connection().forEachActiveStream(new Http2StreamVisitor() {
         @Override
