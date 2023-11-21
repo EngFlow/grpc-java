@@ -21,6 +21,7 @@ import io.grpc.Attributes;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.internal.AbstractServerStream;
+import io.grpc.internal.Protocol;
 import io.grpc.internal.StatsTraceContext;
 import io.grpc.internal.TransportTracer;
 import io.grpc.internal.WritableBuffer;
@@ -172,7 +173,7 @@ class OkHttpServerStream extends AbstractServerStream {
         int initialWindowSize,
         TransportTracer transportTracer,
         String methodName) {
-      super(maxMessageSize, statsTraceCtx, transportTracer);
+      super(maxMessageSize, statsTraceCtx, transportTracer, Protocol.GRPC);
       this.transport = Preconditions.checkNotNull(transport, "transport");
       this.streamId = streamId;
       this.lock = Preconditions.checkNotNull(lock, "lock");
