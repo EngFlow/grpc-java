@@ -16,6 +16,7 @@
 
 package io.grpc.netty;
 
+import io.grpc.internal.Protocol;
 import io.netty.handler.codec.http2.Http2Headers;
 import io.netty.util.AsciiString;
 import java.util.Iterator;
@@ -46,11 +47,22 @@ final class GrpcHttp2OutboundHeaders extends AbstractHttp2Headers {
     return new GrpcHttp2OutboundHeaders(preHeaders, serializedMetadata);
   }
 
-  static GrpcHttp2OutboundHeaders serverResponseHeaders(byte[][] serializedMetadata) {
-    AsciiString[] preHeaders = new AsciiString[] {
-        Http2Headers.PseudoHeaderName.STATUS.value(), Utils.STATUS_OK,
-        Utils.CONTENT_TYPE_HEADER, Utils.CONTENT_TYPE_GRPC,
-    };
+  static GrpcHttp2OutboundHeaders serverResponseHeaders(byte[][] serializedMetadata,
+      Protocol protocol) {
+    AsciiString[] preHeaders;
+    if (protocol == Protocol.GRPC) {
+      preHeaders = new AsciiString[] {
+          Http2Headers.PseudoHeaderName.STATUS.value(), Utils.STATUS_OK,
+          Utils.CONTENT_TYPE_HEADER, Utils.CONTENT_TYPE_GRPC,
+      };
+    } else {
+      // TODO: Add CORS headers!
+      preHeaders =
+          new AsciiString[] {
+            Http2Headers.PseudoHeaderName.STATUS.value(), Utils.STATUS_OK,
+            Utils.CONTENT_TYPE_HEADER, Utils.CONTENT_TYPE_GRPC_WEB_TEXT_PROTO,
+          };
+    }
     return new GrpcHttp2OutboundHeaders(preHeaders, serializedMetadata);
   }
 

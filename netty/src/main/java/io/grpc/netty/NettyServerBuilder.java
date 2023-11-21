@@ -29,6 +29,7 @@ import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.CheckReturnValue;
 import com.google.errorprone.annotations.InlineMe;
 import io.grpc.Attributes;
+import io.grpc.internal.Protocol;
 import io.grpc.ExperimentalApi;
 import io.grpc.Internal;
 import io.grpc.ServerBuilder;
@@ -68,6 +69,8 @@ import javax.net.ssl.SSLException;
 @ExperimentalApi("https://github.com/grpc/grpc-java/issues/1784")
 @CheckReturnValue
 public final class NettyServerBuilder extends AbstractServerImplBuilder<NettyServerBuilder> {
+  public static final Attributes.Key<Protocol> STREAM_ATTR_PROTOCOL =
+      Attributes.Key.create("protocol");
 
   // 1MiB
   public static final int DEFAULT_FLOW_CONTROL_WINDOW = 1024 * 1024;
@@ -114,6 +117,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
   private boolean permitKeepAliveWithoutCalls;
   private long permitKeepAliveTimeInNanos = TimeUnit.MINUTES.toNanos(5);
   private Attributes eagAttributes = Attributes.EMPTY;
+  private boolean permitGrpcWebText;
 
   /**
    * Creates a server builder that will bind to the given port.
@@ -664,7 +668,7 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
         keepAliveTimeInNanos, keepAliveTimeoutInNanos,
         maxConnectionIdleInNanos, maxConnectionAgeInNanos,
         maxConnectionAgeGraceInNanos, permitKeepAliveWithoutCalls, permitKeepAliveTimeInNanos,
-        eagAttributes, this.serverImplBuilder.getChannelz());
+        eagAttributes, permitGrpcWebText, this.serverImplBuilder.getChannelz());
   }
 
   @VisibleForTesting
@@ -716,6 +720,11 @@ public final class NettyServerBuilder extends AbstractServerImplBuilder<NettySer
       throw new RuntimeException(e);
     }
     protocolNegotiatorFactory = ProtocolNegotiators.serverTlsFactory(sslContext);
+    return this;
+  }
+
+  public NettyServerBuilder permitGrpcWebText(boolean permit) {
+    permitGrpcWebText = permit;
     return this;
   }
 }
