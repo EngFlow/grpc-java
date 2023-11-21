@@ -33,6 +33,7 @@ package io.grpc.netty;
 
 import static com.google.common.base.Charsets.US_ASCII;
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 import static io.grpc.netty.Utils.TE_HEADER;
 import static io.netty.handler.codec.http2.Http2Error.PROTOCOL_ERROR;
 import static io.netty.handler.codec.http2.Http2Exception.connectionError;
@@ -52,6 +53,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 /**
  * A headers utils providing custom gRPC implementations of {@link DefaultHttp2HeadersDecoder}.
@@ -349,6 +351,70 @@ class GrpcHttp2HeadersUtils {
 
     GrpcHttp2RequestHeaders(int numHeadersGuess) {
       super(numHeadersGuess);
+    }
+
+    private AsciiString[] listPseudoHeaders() {
+      int len = (path != null ? 1 : 0)
+          + (authority != null ? 1 : 0)
+          + (method != null ? 1 : 0)
+          + (scheme != null ? 1 : 0)
+          + (te != null ? 1 : 0);
+      AsciiString[] result = new AsciiString[2 * len];
+      int i = 0;
+      if (path != null) {
+        result[i++] = PATH_HEADER;
+        result[i++] = path;
+      }
+      if (authority != null) {
+        result[i++] = AUTHORITY_HEADER;
+        result[i++] = authority;
+      }
+      if (method != null) {
+        result[i++] = METHOD_HEADER;
+        result[i++] = method;
+      }
+      if (scheme != null) {
+        result[i++] = SCHEME_HEADER;
+        result[i++] = scheme;
+      }
+      if (te != null) {
+        result[i++] = TE_HEADER;
+        result[i++] = te;
+      }
+      checkState(i == result.length);
+      return result;
+    }
+
+    @Override
+    public Iterator<Map.Entry<CharSequence, CharSequence>> iterator() {
+      return new Iterator<Map.Entry<CharSequence, CharSequence>>() {
+        private AsciiString[] pseudoHeaders = listPseudoHeaders();
+        private int index = -pseudoHeaders.length;
+
+        @Override
+        public boolean hasNext() {
+          return index < numHeaders() * 2;
+        }
+
+        @Override
+        public Map.Entry<CharSequence, CharSequence> next() {
+          if (!hasNext()) {
+            throw new NoSuchElementException();
+          }
+          Map.Entry<CharSequence, CharSequence> result;
+          if (index < 0) {
+            int i = pseudoHeaders.length + index;
+            result = new AbstractMap.SimpleEntry(pseudoHeaders[i], pseudoHeaders[i + 1]);
+          } else {
+            // This is probably incorrect for UTF-8 sequences. Does it matter?
+            CharSequence name = new AsciiString(namesAndValues()[index], false);
+            CharSequence value = new AsciiString(namesAndValues()[index + 1], false);
+            result = new AbstractMap.SimpleEntry(name, value);
+          }
+          index += 2;
+          return result;
+        }
+      };
     }
 
     @Override
