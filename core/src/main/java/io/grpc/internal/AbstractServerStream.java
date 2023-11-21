@@ -198,11 +198,13 @@ public abstract class AbstractServerStream extends AbstractStream
     protected TransportState(
         int maxMessageSize,
         StatsTraceContext statsTraceCtx,
-        TransportTracer transportTracer) {
+        TransportTracer transportTracer,
+        Protocol protocol) {
       super(
           maxMessageSize,
           statsTraceCtx,
-          Preconditions.checkNotNull(transportTracer, "transportTracer"));
+          Preconditions.checkNotNull(transportTracer, "transportTracer"),
+          Preconditions.checkNotNull(protocol, "protocol"));
       this.statsTraceCtx = Preconditions.checkNotNull(statsTraceCtx, "statsTraceCtx");
     }
 
