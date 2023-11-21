@@ -44,16 +44,28 @@ import io.grpc.TlsServerCredentials;
 import io.grpc.internal.GrpcAttributes;
 import io.grpc.internal.GrpcUtil;
 import io.grpc.internal.ObjectPool;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpClientUpgradeHandler;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http2.Http2ClientUpgradeCodec;
 import io.netty.handler.proxy.HttpProxyHandler;
@@ -374,7 +386,12 @@ final class ProtocolNegotiators {
       @Override
       public ChannelHandler newHandler(GrpcHttp2ConnectionHandler handler) {
         ChannelHandler gnh = new GrpcNegotiationHandler(handler);
-        ChannelHandler sth = new ServerTlsHandler(gnh, sslContext, executorPool);
+        ChannelHandler sth =
+            new ServerTlsHandler(
+                gnh,
+                new UnsupportedHttp1ConnectionHandler(),
+                sslContext,
+                executorPool);
         return new WaitUntilActiveHandler(sth, handler.getNegotiationLogger());
       }
 
@@ -402,15 +419,18 @@ final class ProtocolNegotiators {
   static final class ServerTlsHandler extends ChannelInboundHandlerAdapter {
     private Executor executor;
     private final ChannelHandler next;
+    private final ChannelHandler fallback;
     private final SslContext sslContext;
 
     private ProtocolNegotiationEvent pne = ProtocolNegotiationEvent.DEFAULT;
 
     ServerTlsHandler(ChannelHandler next,
+        ChannelHandler fallback,
         SslContext sslContext,
         final ObjectPool<? extends Executor> executorPool) {
       this.sslContext = checkNotNull(sslContext, "sslContext");
       this.next = checkNotNull(next, "next");
+      this.fallback = checkNotNull(fallback, "fallback");
       if (executorPool != null) {
         this.executor = executorPool.getObject();
       }
@@ -439,9 +459,8 @@ final class ProtocolNegotiators {
         SslHandler sslHandler = ctx.pipeline().get(SslHandler.class);
         if (!sslContext.applicationProtocolNegotiator().protocols().contains(
                 sslHandler.applicationProtocol())) {
-          logSslEngineDetails(Level.FINE, ctx, "TLS negotiation failed for new client.", null);
-          ctx.fireExceptionCaught(unavailableException(
-              "Failed protocol negotiation: Unable to find compatible protocol"));
+          // Fall back to HTTP/1 if protocol negotiation doesn't come up with a viable protocol.
+          ctx.pipeline().replace(ctx.name(), null, fallback);
           return;
         }
         ctx.pipeline().replace(ctx.name(), null, next);
@@ -458,6 +477,67 @@ final class ProtocolNegotiators {
           .set(Grpc.TRANSPORT_ATTR_SSL_SESSION, session)
           .build();
       ctx.fireUserEventTriggered(pne.withAttributes(attrs).withSecurity(security));
+    }
+  }
+
+  /** A netty HTTP handler that responds with a 400 page stating that HTTP/1.x is not supported. */
+  private static class UnsupportedHttp1ConnectionHandler
+          extends SimpleChannelInboundHandler<FullHttpRequest> {
+    private static final int MAX_CONTENT_LENGTH = 1024 * 100;
+
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+      super.handlerAdded(ctx);
+
+      ctx.pipeline().addBefore(ctx.name(), null, new HttpServerCodec());
+      ctx.pipeline().addBefore(ctx.name(), null, new HttpObjectAggregator(MAX_CONTENT_LENGTH));
+    }
+
+    @Override
+    public void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
+      if (HttpUtil.is100ContinueExpected(request)) {
+        ctx.write(
+                new DefaultFullHttpResponse(
+                        HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE, Unpooled.EMPTY_BUFFER));
+        return;
+      }
+
+      ByteBuf content = ctx.alloc().buffer();
+      ByteBufUtil.writeAscii(
+              content, String.format("Received unsupported '%s' request\n", request.protocolVersion()));
+
+      FullHttpResponse response =
+              new DefaultFullHttpResponse(
+                      HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST, content);
+      response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain; charset=UTF-8");
+      response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, response.content().readableBytes());
+
+      writeResponse(ctx, request, response);
+    }
+
+    private void writeResponse(
+            ChannelHandlerContext ctx, FullHttpRequest request, FullHttpResponse response) {
+      if (HttpUtil.isKeepAlive(request)) {
+        if (request.protocolVersion().equals(HttpVersion.HTTP_1_0)) {
+          response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+        }
+        ctx.write(response);
+      } else {
+        // Tell the client we're going to close the connection.
+        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
+        ctx.write(response).addListener(ChannelFutureListener.CLOSE);
+      }
+    }
+
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+      ctx.flush();
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+      log.log(Level.SEVERE, "Caught exception in HTTP/1.1 mode", cause);
+      ctx.close();
     }
   }
 
