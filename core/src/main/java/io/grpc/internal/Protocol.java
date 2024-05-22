@@ -18,5 +18,6 @@ package io.grpc.internal;
 
 public enum Protocol {
   GRPC,
-  GRPC_WEB_TEXT;
+  GRPC_WEB_TEXT,
+  GRPC_WEB_PROTO;
 }

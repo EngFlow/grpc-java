@@ -173,7 +173,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       long permitKeepAliveTimeInNanos,
       Attributes eagAttributes,
       HttpStreamListener httpStreamListener,
-      boolean permitGrpcWebText) {
+      boolean permitGrpcWeb) {
     Preconditions.checkArgument(maxHeaderListSize > 0, "maxHeaderListSize must be positive: %s",
         maxHeaderListSize);
     Http2FrameLogger frameLogger = new Http2FrameLogger(LogLevel.DEBUG, NettyServerHandler.class);
@@ -204,7 +204,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         eagAttributes,
         Ticker.systemTicker(),
         httpStreamListener,
-        permitGrpcWebText);
+        permitGrpcWeb);
   }
 
   static NettyServerHandler newHandler(
@@ -229,7 +229,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       Attributes eagAttributes,
       Ticker ticker,
       HttpStreamListener httpStreamListener,
-      boolean permitGrpcWebText) {
+      boolean permitGrpcWeb) {
     Preconditions.checkArgument(maxStreams > 0, "maxStreams must be positive: %s", maxStreams);
     Preconditions.checkArgument(flowControlWindow > 0, "flowControlWindow must be positive: %s",
         flowControlWindow);
@@ -281,7 +281,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         autoFlowControl,
         eagAttributes, ticker,
         httpStreamListener,
-        permitGrpcWebText);
+        permitGrpcWeb);
   }
 
   private NettyServerHandler(
@@ -304,7 +304,7 @@ class NettyServerHandler extends AbstractNettyHandler {
       Attributes eagAttributes,
       Ticker ticker,
       HttpStreamListener httpStreamListener,
-      boolean permitGrpcWebText) {
+      boolean permitGrpcWeb) {
     super(channelUnused, decoder, encoder, settings, new ServerChannelLogger(),
         autoFlowControl, null, ticker);
 
@@ -349,8 +349,8 @@ class NettyServerHandler extends AbstractNettyHandler {
     this.httpStreamListener = httpStreamListener;
     this.permittedProtocols =
         Sets.immutableEnumSet(
-            permitGrpcWebText
-                ? EnumSet.of(Protocol.GRPC, Protocol.GRPC_WEB_TEXT)
+            permitGrpcWeb
+                ? EnumSet.of(Protocol.GRPC, Protocol.GRPC_WEB_TEXT, Protocol.GRPC_WEB_PROTO)
                 : EnumSet.of(Protocol.GRPC));
 
     streamKey = encoder.connection().newKey();
@@ -541,8 +541,11 @@ class NettyServerHandler extends AbstractNettyHandler {
     if (GrpcUtil.isGrpcContentType(contentTypeString)) {
       return Protocol.GRPC;
     }
-    if (GrpcUtil.isGrpcWebContentType(contentTypeString)) {
+    if (GrpcUtil.isGrpcWebTextContentType(contentTypeString)) {
       return Protocol.GRPC_WEB_TEXT;
+    }
+    if (GrpcUtil.isGrpcWebProtoContentType(contentTypeString)) {
+      return Protocol.GRPC_WEB_PROTO;
     }
     return null;
   }

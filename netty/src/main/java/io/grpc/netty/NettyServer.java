@@ -101,7 +101,7 @@ class NettyServer implements InternalServer, InternalWithLogId {
   private final long permitKeepAliveTimeInNanos;
   private final Attributes eagAttributes;
   private final HttpStreamListener httpStreamListener;
-  private final boolean permitGrpcWebText;
+  private final boolean permitGrpcWeb;
   private final ReferenceCounted sharedResourceReferenceCounter =
       new SharedResourceReferenceCounter();
   private final List<? extends ServerStreamTracer.Factory> streamTracerFactories;
@@ -129,7 +129,7 @@ class NettyServer implements InternalServer, InternalWithLogId {
       long maxConnectionIdleInNanos,
       long maxConnectionAgeInNanos, long maxConnectionAgeGraceInNanos,
       boolean permitKeepAliveWithoutCalls, long permitKeepAliveTimeInNanos,
-      Attributes eagAttributes, HttpStreamListener httpStreamListener, boolean permitGrpcWebText, InternalChannelz channelz) {
+      Attributes eagAttributes, HttpStreamListener httpStreamListener, boolean permitGrpcWeb, InternalChannelz channelz) {
     this.addresses = checkNotNull(addresses, "addresses");
     this.channelFactory = checkNotNull(channelFactory, "channelFactory");
     checkNotNull(channelOptions, "channelOptions");
@@ -160,7 +160,7 @@ class NettyServer implements InternalServer, InternalWithLogId {
     this.permitKeepAliveTimeInNanos = permitKeepAliveTimeInNanos;
     this.eagAttributes = checkNotNull(eagAttributes, "eagAttributes");
     this.httpStreamListener = httpStreamListener;
-    this.permitGrpcWebText = permitGrpcWebText;
+    this.permitGrpcWeb = permitGrpcWeb;
     this.channelz = Preconditions.checkNotNull(channelz);
     this.logId = InternalLogId.allocate(getClass(), addresses.isEmpty() ? "No address" :
         String.valueOf(addresses));
@@ -263,7 +263,7 @@ class NettyServer implements InternalServer, InternalWithLogId {
                 permitKeepAliveTimeInNanos,
                 eagAttributes,
                 httpStreamListener,
-                permitGrpcWebText);
+                permitGrpcWeb);
         ServerTransportListener transportListener;
         // This is to order callbacks on the listener, not to guard access to channel.
         synchronized (NettyServer.this) {

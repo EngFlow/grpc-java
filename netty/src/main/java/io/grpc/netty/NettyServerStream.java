@@ -71,7 +71,10 @@ class NettyServerStream extends AbstractServerStream {
       TransportTracer transportTracer,
       Protocol protocol) {
     super(new NettyWritableBufferAllocator(channel.alloc()), statsTraceCtx);
-    this.sink = protocol == Protocol.GRPC_WEB_TEXT ? new GrpcWebTextSink() : new Sink();
+    this.sink =
+        protocol == Protocol.GRPC_WEB_TEXT
+            ? new GrpcWebTextSink()
+            : protocol == Protocol.GRPC_WEB_PROTO ? new GrpcWebProtoSink() : new Sink();
     this.state = checkNotNull(state, "transportState");
     this.channel = checkNotNull(channel, "channel");
     this.writeQueue = state.handler.getWriteQueue();
@@ -109,8 +112,7 @@ class NettyServerStream extends AbstractServerStream {
       try (TaskCloseable ignore = PerfMark.traceTask("NettyServerStream$Sink.writeHeaders")) {
         writeQueue.enqueue(
             SendResponseHeadersCommand.createHeaders(
-                transportState(),
-                Utils.convertServerHeaders(headers, protocol)),
+                transportState(), Utils.convertServerHeaders(headers, protocol)),
             true);
       }
     }
@@ -120,18 +122,20 @@ class NettyServerStream extends AbstractServerStream {
       final int numBytes = bytebuf.readableBytes();
       // Add the bytes to outbound flow control.
       onSendingBytes(numBytes);
-      writeQueue.enqueue(new SendGrpcFrameCommand(transportState(), bytebuf, false), flush)
-          .addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) throws Exception {
-              // Remove the bytes from outbound flow control, optionally notifying
-              // the client that they can send more bytes.
-              transportState().onSentBytes(numBytes);
-              if (future.isSuccess()) {
-                transportTracer.reportMessageSent(numMessages);
-              }
-            }
-          });
+      writeQueue
+          .enqueue(new SendGrpcFrameCommand(transportState(), bytebuf, false), flush)
+          .addListener(
+              new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                  // Remove the bytes from outbound flow control, optionally notifying
+                  // the client that they can send more bytes.
+                  transportState().onSentBytes(numBytes);
+                  if (future.isSuccess()) {
+                    transportTracer.reportMessageSent(numMessages);
+                  }
+                }
+              });
     }
 
     @Override
@@ -164,20 +168,84 @@ class NettyServerStream extends AbstractServerStream {
     }
   }
 
+  private class GrpcWebProtoSink extends Sink implements AbstractServerStream.Sink {
+    @Override
+    public void writeTrailers(Metadata trailers, boolean headersSent, Status status) {
+      // The grpc-web protocol is special in that it cannot use existing HTTP/2 facilities to post
+      // trailers. Instead, we send them as headers here and *also* as trailer frames.
+      if (!headersSent) {
+        // Note that writeHeaders automatically takes grpc-web into account by rewriting the given
+        // headers.
+        writeHeaders(trailers);
+      }
+      PerfMark.startTask("NettyServerStream$Sink.writeTrailers");
+      try {
+        // TODO: convertTrailers does not take the protocol into account. What to do?
+        Http2Headers http2Trailers = Utils.convertTrailers(trailers, true);
+
+        // TODO: What's the right size to use here?
+        ByteBuf bytebuf = channel.alloc().buffer(1024).touch();
+        // The trailers are sent as a base64-encoded packet with the following structure:
+        // byte ID(0x80)
+        // int length (total length of the HTTP headers not including the ID and length fields)
+        // HTTP headers as a list of <string>:<value>\r\n
+        bytebuf.writeByte(0x80); // TRAILER FRAME
+        // We don't know the size yet so we write 0 and patch it afterwards.
+        int address = bytebuf.writerIndex();
+        bytebuf.writeInt(0);
+
+        // We use ISO_8859_1 for the Charset to match Netty. See HpackEncoder.encodeStringLiteral.
+        for (Entry<CharSequence, CharSequence> entry : http2Trailers) {
+          bytebuf.writeCharSequence(
+              String.format("%s:%s\r\n", entry.getKey(), entry.getValue()),
+              StandardCharsets.ISO_8859_1);
+        }
+
+        // Patch the length.
+        int len = bytebuf.readableBytes() - 5;
+        bytebuf.setByte(address + 0, (len >> 24) & 0xff);
+        bytebuf.setByte(address + 1, (len >> 16) & 0xff);
+        bytebuf.setByte(address + 2, (len >> 8) & 0xff);
+        bytebuf.setByte(address + 3, len & 0xff);
+
+        int numBytes = bytebuf.readableBytes();
+        writeQueue
+            .enqueue(new SendGrpcFrameCommand(transportState(), bytebuf, true), true)
+            .addListener(
+                new ChannelFutureListener() {
+                  @Override
+                  public void operationComplete(ChannelFuture future) throws Exception {
+                    // TODO: I think we need to update flow control here. IS THAT CORRECT?
+                    // Remove the bytes from outbound flow control, optionally notifying
+                    // the client that they can send more bytes.
+                    transportState().onSentBytes(numBytes);
+                    // TODO: I think this isn't needed, but not sure. Check with upstream!
+                    //                      if (future.isSuccess()) {
+                    //                        transportTracer.reportMessageSent(numMessages);
+                    //                      }
+                  }
+                });
+      } finally {
+        PerfMark.stopTask("NettyServerStream$Sink.writeTrailers");
+      }
+    }
+  }
+
+  // TODO: remove when we're no longer using the grpc-web-text protocol anywhere
   private class GrpcWebTextSink extends Sink implements AbstractServerStream.Sink {
     @Override
     protected void writeFrameInternal(ByteBuf unencoded, boolean flush, final int numMessages) {
       // The frames already have the correct header (0x00 plus 4-byte length); we only need to
       // encode them as Base64.
       ByteBuf encoded =
-              Base64.encode(
-                      unencoded,
-                      unencoded.readerIndex(),
-                      unencoded.readableBytes(),
-                      false,
-                      Base64Dialect.STANDARD,
-                      channel.alloc())
-                      .touch();
+          Base64.encode(
+                  unencoded,
+                  unencoded.readerIndex(),
+                  unencoded.readableBytes(),
+                  false,
+                  Base64Dialect.STANDARD,
+                  channel.alloc())
+              .touch();
       unencoded.release();
       super.writeFrameInternal(encoded, flush, numMessages);
     }
@@ -285,17 +353,18 @@ class NettyServerStream extends AbstractServerStream {
         r.run();
       } else {
         final Link link = PerfMark.linkOut();
-        eventLoop.execute(new Runnable() {
-          @Override
-          public void run() {
-            try (TaskCloseable ignore =
-                     PerfMark.traceTask("NettyServerStream$TransportState.runOnTransportThread")) {
-              PerfMark.attachTag(tag);
-              PerfMark.linkIn(link);
-              r.run();
-            }
-          }
-        });
+        eventLoop.execute(
+            new Runnable() {
+              @Override
+              public void run() {
+                try (TaskCloseable ignore =
+                    PerfMark.traceTask("NettyServerStream$TransportState.runOnTransportThread")) {
+                  PerfMark.attachTag(tag);
+                  PerfMark.linkIn(link);
+                  r.run();
+                }
+              }
+            });
       }
     }
 

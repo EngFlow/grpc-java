@@ -118,7 +118,7 @@ public final class NettyServerBuilder extends ForwardingServerBuilder<NettyServe
   private long permitKeepAliveTimeInNanos = TimeUnit.MINUTES.toNanos(5);
   private Attributes eagAttributes = Attributes.EMPTY;
   private HttpStreamListener httpStreamListener;
-  private boolean permitGrpcWebText;
+  private boolean permitGrpcWeb;
 
   /**
    * Creates a server builder that will bind to the given port.
@@ -669,7 +669,7 @@ public final class NettyServerBuilder extends ForwardingServerBuilder<NettyServe
         keepAliveTimeInNanos, keepAliveTimeoutInNanos,
         maxConnectionIdleInNanos, maxConnectionAgeInNanos,
         maxConnectionAgeGraceInNanos, permitKeepAliveWithoutCalls, permitKeepAliveTimeInNanos,
-        eagAttributes, httpStreamListener, permitGrpcWebText, this.serverImplBuilder.getChannelz());
+        eagAttributes, httpStreamListener, permitGrpcWeb, this.serverImplBuilder.getChannelz());
   }
 
   @VisibleForTesting
@@ -729,8 +729,8 @@ public final class NettyServerBuilder extends ForwardingServerBuilder<NettyServe
     return this;
   }
 
-  public NettyServerBuilder permitGrpcWebText(boolean permit) {
-    permitGrpcWebText = permit;
+  public NettyServerBuilder permitGrpcWeb(boolean permit) {
+    permitGrpcWeb = permit;
     return this;
   }
 }

@@ -173,6 +173,7 @@ public final class GrpcUtil {
   public static final String CONTENT_TYPE_GRPC = "application/grpc";
 
   public static final String CONTENT_TYPE_GRPC_WEB = "application/grpc-web";
+  public static final String CONTENT_TYPE_GRPC_WEB_PROTO = "application/grpc-web+proto";
   public static final String CONTENT_TYPE_GRPC_WEB_TEXT = "application/grpc-web-text";
   public static final String CONTENT_TYPE_GRPC_WEB_TEXT_PROTO = "application/grpc-web-text+proto";
 
@@ -461,11 +462,17 @@ public final class GrpcUtil {
     return nextChar == '+' || nextChar == ';';
   }
 
-  public static boolean isGrpcWebContentType(String contentType) {
+  public static boolean isGrpcWebProtoContentType(String contentType) {
     if (contentType == null) {
       return false;
     }
-    // TODO: Also support grpc-web, grpc-web+proto, and grpc-web-text+proto.
+    return CONTENT_TYPE_GRPC_WEB_PROTO.equals(contentType.toLowerCase());
+  }
+
+  public static boolean isGrpcWebTextContentType(String contentType) {
+    if (contentType == null) {
+      return false;
+    }
     return CONTENT_TYPE_GRPC_WEB_TEXT.equals(contentType.toLowerCase());
   }
 
